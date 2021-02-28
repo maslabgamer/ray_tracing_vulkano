@@ -1,0 +1,80 @@
+#version 450
+
+// Constants
+float MAX_FLOAT = 340282350000000000000.0;
+
+// Declare custom functions
+vec3 canvasToViewport();
+vec2 intersectRaySphere(vec3 D, vec3 center, float color);
+
+// Layout bindings
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8) uniform writeonly image2D img;
+
+layout(set = 0, binding = 1) uniform Camera {
+    vec3 position;
+} camera;
+
+struct Sphere {
+    vec4 center;
+    ivec4 color;
+};
+
+layout(set = 0, binding = 2) uniform Spheres {
+    Sphere instances[3];
+} spheres;
+
+void main() {
+    float closest_t = MAX_FLOAT;
+    vec3 closest_sphere_color = vec3(1.0);
+
+    vec3 D = canvasToViewport();
+
+    for (int i = 0; i < 3; ++i) {
+        Sphere sphere = spheres.instances[i];
+        float sphere_radius = float(sphere.color.w);
+        vec2 t = intersectRaySphere(D, sphere.center.xyz, sphere_radius);
+        float t1 = t.x;
+        float t2 = t.y;
+
+        if ((1.0 <= t1 && t1 <= MAX_FLOAT) && t1 < closest_t) {
+            closest_t = t1;
+            closest_sphere_color = sphere.color.xyz;
+        }
+        if ((1.0 <= t2 && t2 <= MAX_FLOAT) && t2 < closest_t) {
+            closest_t = t2;
+            closest_sphere_color = sphere.color.xyz;
+        }
+    }
+
+    imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(closest_sphere_color, 1.0));
+}
+
+// Hardcoding in the canvas height and width for now. Not messing with that yet
+vec3 canvasToViewport() {
+    // Since we're not sending in viewport coordinates, we need to calculate them here
+    float x = gl_GlobalInvocationID.x - (1920.0 / 2.0);
+    float y = gl_GlobalInvocationID.y - (1080.0 / 2.0);
+
+    return vec3(x * (1.0 / 1920.0), -(y * (1.0 / 1080.0)), 1.0);
+}
+
+vec2 intersectRaySphere(vec3 D, vec3 center, float radius) {
+    // Hardcoding camera position as (0, 0, 0) for now
+    vec3 CO = camera.position - center;
+
+    float a = dot(D, D);
+    float b = 2.0 * dot(CO, D);
+    float c = dot(CO, CO) - (radius * radius);
+
+    float discriminant = (b * b) - (4.0 * a * c);
+
+    if (discriminant < 0.0) {
+        return vec2(MAX_FLOAT, MAX_FLOAT);
+    }
+
+    float t1 = (-b + sqrt(discriminant)) / (2.0 * a);
+    float t2 = (-b - sqrt(discriminant)) / (2.0 * a);
+    return vec2(t1, t2);
+}

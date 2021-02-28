@@ -1,0 +1,17 @@
+[package]
+name = "ray_tracing_vulkano"
+version = "0.1.0"
+authors = ["maslabgamer <maslabgamer@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cgmath = "0.18.0"
+wgpu = "0.7.0"
+image = "0.23.13"
+vulkano = "0.20.0"
+vulkano-shaders = "0.20.0"
+
+[profile.dev]
+opt-level = 3
