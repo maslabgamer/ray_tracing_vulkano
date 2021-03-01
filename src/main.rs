@@ -1,8 +1,11 @@
 mod sphere;
 mod camera;
 mod engine;
+mod light;
+mod object_traits;
 
 use crate::sphere::Sphere;
+use crate::object_traits::Uniform;
 use std::sync::Arc;
 use vulkano::image::{StorageImage, Dimensions};
 use vulkano::format::Format;
@@ -15,6 +18,8 @@ use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::PipelineLayoutAbstract;
 use crate::camera::Camera;
 use crate::engine::Engine;
+use crate::light::{Light, LightType};
+use cgmath::Vector3;
 
 const IMAGE_WIDTH: u32 = 1920;
 const IMAGE_HEIGHT: u32 = 1080;
@@ -22,10 +27,19 @@ const IMAGE_HEIGHT: u32 = 1080;
 fn main() {
     let engine = Engine::new();
 
-    let scene: [Sphere; 3] = [
-        Sphere::new(0.0, -1.0, 3.0, 1, &[255, 0, 0, 0]),
-        Sphere::new(2.0, 0.0, 4.0, 1, &[0, 0, 255, 0]),
-        Sphere::new(-2.0, 0.0, 4.0, 1, &[0, 255, 0, 0]),
+    // Set up Spheres
+    let scene: [Sphere; 4] = [
+        Sphere::new(0.0, -1.0, 3.0, 1, &[1.0, 0.0, 0.0, 0.0]),
+        Sphere::new(2.0, 0.0, 4.0, 1, &[0.0, 0.0, 1.0, 0.0]),
+        Sphere::new(-2.0, 0.0, 4.0, 1, &[0.0, 1.0, 0.0, 0.0]),
+        Sphere::new(0.0, -5001.0, 4.0, 5000, &[1.0, 1.0, 0.0, 0.0]),
+    ];
+
+    // Set up Lights
+    let lights: [Light; 3] = [
+        Light::new(LightType::Ambient, 0.2, None),
+        Light::new(LightType::Point, 0.6, Some(Vector3::new(2.0, 1.0, 0.0))),
+        Light::new(LightType::Directional, 0.2, Some(Vector3::new(1.0, 4.0, 4.0))),
     ];
 
     let shader = cs::Shader::load(engine.device.clone()).expect("failed to create shader module");
@@ -46,10 +60,11 @@ fn main() {
     let spheres_buffer = CpuBufferPool::<cs::ty::Spheres>::new(engine.device.clone(), BufferUsage::all());
 
     let spheres_buffer_subbuffer = {
-        let spheres: [cs::ty::Sphere; 3] = [
+        let spheres: [cs::ty::Sphere; 4] = [
             scene[0].to_uniform(),
             scene[1].to_uniform(),
             scene[2].to_uniform(),
+            scene[3].to_uniform(),
         ];
 
         let uniform_data = cs::ty::Spheres {
@@ -57,6 +72,23 @@ fn main() {
         };
 
         Arc::new(spheres_buffer.next(uniform_data).unwrap())
+    };
+
+    // Initialize lights uniform buffer
+    let lights_buffer = CpuBufferPool::<cs::ty::Lights>::new(engine.device.clone(), BufferUsage::all());
+
+    let lights_buffer_subbuffer = {
+        let lights: [cs::ty::Light; 3] = [
+            lights[0].to_uniform(),
+            lights[1].to_uniform(),
+            lights[2].to_uniform(),
+        ];
+
+        let uniform_data = cs::ty::Lights {
+            instances: lights.into(),
+        };
+
+        Arc::new(lights_buffer.next(uniform_data).unwrap())
     };
 
     // Create an image
@@ -73,6 +105,7 @@ fn main() {
             .add_image(image.clone()).unwrap() // Image we write to
             .add_buffer(camera_subbuffer.clone()).unwrap() // Camera uniform
             .add_buffer(spheres_buffer_subbuffer.clone()).unwrap() // Spheres uniform
+            .add_buffer(lights_buffer_subbuffer.clone()).unwrap() // Lights uniform
             .build().unwrap()
     );
 

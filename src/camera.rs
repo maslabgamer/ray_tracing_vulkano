@@ -1,6 +1,7 @@
 use cgmath::Vector3;
 
 use crate::cs;
+use crate::object_traits::Uniform;
 
 #[derive(Debug)]
 pub struct Camera {
@@ -13,8 +14,12 @@ impl Camera {
             position: Vector3 { x: 0.0, y: 0.0, z: 0.0 }
         }
     }
+}
 
-    pub fn to_uniform(&self) -> cs::ty::Camera {
+impl Uniform for Camera {
+    type Uniform = cs::ty::Camera;
+
+    fn to_uniform(&self) -> Self::Uniform {
         cs::ty::Camera {
             position: self.position.into(),
         }
