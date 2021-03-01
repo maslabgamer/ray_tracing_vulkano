@@ -22,17 +22,17 @@ use crate::light::{Light, LightType};
 use cgmath::Vector3;
 
 const IMAGE_WIDTH: u32 = 1920;
-const IMAGE_HEIGHT: u32 = 1080;
+const IMAGE_HEIGHT: u32 = 1920;
 
 fn main() {
     let engine = Engine::new();
 
     // Set up Spheres
     let scene: [Sphere; 4] = [
-        Sphere::new(0.0, -1.0, 3.0, 1, &[1.0, 0.0, 0.0, 0.0]),
-        Sphere::new(2.0, 0.0, 4.0, 1, &[0.0, 0.0, 1.0, 0.0]),
-        Sphere::new(-2.0, 0.0, 4.0, 1, &[0.0, 1.0, 0.0, 0.0]),
-        Sphere::new(0.0, -5001.0, 4.0, 5000, &[1.0, 1.0, 0.0, 0.0]),
+        Sphere::new(0.0, -1.0, 3.0, 1, &[1.0, 0.0, 0.0, 0.0], 500),
+        Sphere::new(2.0, 0.0, 4.0, 1, &[0.0, 0.0, 1.0, 0.0], 500),
+        Sphere::new(-2.0, 0.0, 4.0, 1, &[0.0, 1.0, 0.0, 0.0], 10),
+        Sphere::new(0.0, -5001.0, 4.0, 5000, &[1.0, 1.0, 0.0, 0.0], 1000),
     ];
 
     // Set up Lights

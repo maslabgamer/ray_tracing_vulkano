@@ -1,6 +1,9 @@
 #version 450
 
 // Constants
+const float IMAGE_WIDTH = 1920.0;
+const float IMAGE_HEIGHT = 1920.0;
+
 float MAX_FLOAT = 340282350000000000000.0;
 const int SPHERE_COUNT = 4;
 const int LIGHT_COUNT = 3;
@@ -8,7 +11,7 @@ const int LIGHT_COUNT = 3;
 // Declare custom functions
 vec3 canvasToViewport();
 vec2 intersectRaySphere(vec3 D, vec3 center, float color);
-float computeLighting(vec3 P, vec3 N);
+float computeLighting(vec3 P, vec3 N, vec3 V, float specularity);
 
 // Layout bindings
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
@@ -22,6 +25,9 @@ layout(set = 0, binding = 1) uniform Camera {
 struct Sphere {
     vec4 center;
     vec4 color;
+    float radius;
+    float specular;
+    vec2 padding;
 };
 
 layout(set = 0, binding = 2) uniform Spheres {
@@ -48,7 +54,7 @@ void main() {
 
     for (int i = 0; i < SPHERE_COUNT; ++i) {
         Sphere sphere = spheres.instances[i];
-        float sphere_radius = sphere.color.w;
+        float sphere_radius = sphere.radius;
         vec2 t = intersectRaySphere(D, sphere.center.xyz, sphere_radius);
         float t1 = t.x;
         float t2 = t.y;
@@ -67,14 +73,18 @@ void main() {
     if (closest_sphere_index >= 0) {
         vec3 P = camera.position + (closest_t * D); // Compute intersection
         vec3 N = normalize(P - spheres.instances[closest_sphere_index].center.xyz);
+        Sphere sphere = spheres.instances[closest_sphere_index];
 
         // Write color value to image buffer
-        sphereColor = computeLighting(P, N) * spheres.instances[closest_sphere_index].color.xyz;
+        // V is the vector from the object to the camera, since for reflection we need to know the angle of the
+        // ray reflecting off the object. We already have D, which is the vector of the camera *to* the object,
+        // so just invert that
+        sphereColor = computeLighting(P, N, -D, sphere.specular) * sphere.color.xyz;
     }
     imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(sphereColor, 1.0));
 }
 
-float computeLighting(vec3 P, vec3 N) {
+float computeLighting(vec3 P, vec3 N, vec3 V, float specularity) {
     float intensity = 0.0;
     for (int i = 0; i < LIGHT_COUNT; ++i) {
         Light light = lights.instances[i];
@@ -89,6 +99,15 @@ float computeLighting(vec3 P, vec3 N) {
             if (n_dot_l > 0.0) {
                 intensity += (light.intensity * (n_dot_l / (length(N) * length(L))));
             }
+
+            // Specular
+            if (specularity != -1) {
+                vec3 R = 2 * N * dot(N, L) - L;
+                float r_dot_v = dot(R, V);
+                if (r_dot_v > 0.0) { // Don't add negative light intensity
+                    intensity += light.intensity * pow(r_dot_v / (length(R) * length(V)), specularity);
+                }
+            }
         }
     }
     return intensity;
@@ -97,10 +116,10 @@ float computeLighting(vec3 P, vec3 N) {
 // Hardcoding in the canvas height and width for now. Not messing with that yet
 vec3 canvasToViewport() {
     // Since we're not sending in viewport coordinates, we need to calculate them here
-    float x = gl_GlobalInvocationID.x - (1920.0 / 2.0);
-    float y = gl_GlobalInvocationID.y - (1080.0 / 2.0);
+    float x = gl_GlobalInvocationID.x - (IMAGE_WIDTH / 2.0);
+    float y = gl_GlobalInvocationID.y - (IMAGE_HEIGHT / 2.0);
 
-    return vec3(x * (1.0 / 1920.0), -(y * (1.0 / 1080.0)), 1.0);
+    return vec3(x * (1.0 / IMAGE_WIDTH), -(y * (1.0 / IMAGE_HEIGHT)), 1.0);
 }
 
 vec2 intersectRaySphere(vec3 D, vec3 center, float radius) {

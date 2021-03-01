@@ -24,11 +24,7 @@ impl Light {
             Some(position) => Vector4::new(position.x, position.y, position.z, 0.0)
         };
 
-        Self {
-            light_type,
-            intensity,
-            position
-        }
+        Self { light_type, intensity, position }
     }
 }
 
