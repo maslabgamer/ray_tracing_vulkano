@@ -10,12 +10,19 @@ pub struct Sphere {
     pub(crate) radius: i32,
     pub(crate) color: [f32; 4],
     pub(crate) specular: f32,
+    pub(crate) reflective: f32,
 }
 
 impl Sphere {
-    pub fn new(x: f32, y: f32, z: f32, radius: i32, color: &[f32; 4], specular: i32) -> Self {
+    pub fn new(x: f32, y: f32, z: f32, radius: i32, color: &[f32; 4], specular: i32, reflective: f32) -> Self {
         let center = Vector4 { x, y, z, w: 1.0 };
-        Sphere { center, radius, color: *color, specular: specular as f32 }
+        Sphere {
+            center,
+            radius,
+            color: *color,
+            specular: specular as f32,
+            reflective
+        }
     }
 }
 
@@ -28,7 +35,8 @@ impl Uniform for Sphere {
             color: self.color.into(),
             radius: (self.radius as f32).into(),
             specular: self.specular.into(),
-            padding: [0.0; 2],
+            reflective: self.reflective.into(),
+            padding: 0.0,
         }
     }
 }

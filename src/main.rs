@@ -29,10 +29,31 @@ fn main() {
 
     // Set up Spheres
     let scene: [Sphere; 4] = [
-        Sphere::new(0.0, -1.0, 3.0, 1, &[1.0, 0.0, 0.0, 0.0], 500),
-        Sphere::new(2.0, 0.0, 4.0, 1, &[0.0, 0.0, 1.0, 0.0], 500),
-        Sphere::new(-2.0, 0.0, 4.0, 1, &[0.0, 1.0, 0.0, 0.0], 10),
-        Sphere::new(0.0, -5001.0, 4.0, 5000, &[1.0, 1.0, 0.0, 0.0], 1000),
+        Sphere::new(
+            0.0, -1.0, 3.0,
+            1,
+            &[1.0, 0.0, 0.0, 0.0],
+            500,
+            0.2,
+        ),
+        Sphere::new(2.0, 0.0, 4.0,
+                    1,
+                    &[0.0, 0.0, 1.0, 0.0],
+                    500,
+                    0.3,
+        ),
+        Sphere::new(-2.0, 0.0, 4.0,
+                    1,
+                    &[0.0, 1.0, 0.0, 0.0],
+                    10,
+                    0.4,
+        ),
+        Sphere::new(0.0, -5001.0, 4.0,
+                    5000,
+                    &[1.0, 1.0, 0.0, 0.0],
+                    1000,
+                    0.5,
+        ),
     ];
 
     // Set up Lights
@@ -137,7 +158,7 @@ fn main() {
     let image = ImageBuffer::<Rgba<u8>, _>::from_raw(
         IMAGE_WIDTH,
         IMAGE_HEIGHT,
-        &buffer_content[..]
+        &buffer_content[..],
     ).unwrap();
     image.save("image.png").unwrap();
 }
