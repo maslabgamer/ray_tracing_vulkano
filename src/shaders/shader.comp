@@ -8,9 +8,11 @@ float MAX_FLOAT = 340282350000000000000.0;
 const int SPHERE_COUNT = 4;
 const int LIGHT_COUNT = 3;
 
+const int RAY_RECURSION_DEPTH = 5;
+
 // Declare custom functions
 vec3 canvasToViewport();
-vec3 traceRay(vec3 O, vec3 D, float t_min, float t_max, int recursionDepth);
+vec3 traceRay(vec3 O, vec3 D, float t_min, float t_max);
 vec2 closestIntersection(vec3 P, vec3 D, float t_min, float t_max);
 vec2 intersectRaySphere(vec3 P, vec3 D, vec3 center, float color);
 float computeLighting(vec3 P, vec3 N, vec3 V, float specularity);
@@ -52,30 +54,73 @@ layout(set = 0, binding = 3) uniform Lights {
 void main() {
     // Base raytracing for spheres
     vec3 D = canvasToViewport();
-
-    vec3 sphereColor = traceRay(camera.position, D, 1.0, MAX_FLOAT, 2);
+    vec3 sphereColor = traceRay(camera.position, D, 1.0, MAX_FLOAT);
     // Write color value to image buffer
     imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(sphereColor, 1.0));
 }
 
-vec3 traceRay(vec3 O, vec3 D, float t_min, float t_max, int recursionDepth) {
-    vec2 tracedRay = closestIntersection(camera.position, D, 1.0, MAX_FLOAT);
-    int closest_sphere_index = int(tracedRay.x);
-    if (closest_sphere_index == -1) {
-        return vec3(1.0);
+struct Ray {
+    vec3 color;
+    float reflectiveness;
+};
+
+vec3 traceRay(vec3 O, vec3 D, float t_min, float t_max) {
+    // Can't do recursion, so here's what we'll do
+    // 1. Create an array of Rays that we find. Generate rays until either we hit a non-reflective surface,
+    //    no object, or we hit the recursion limit (which, handily, will also be our max array size)
+    // 2. Iterate backwards through rays, computing the array color as we go.
+    // Since we will be using an array, we must use a constant size. This is fine since our recursion would be
+    // the same regardless
+    Ray rays[RAY_RECURSION_DEPTH];
+    vec3 P = O;
+    vec3 R = D;
+    int counter;
+    for (counter = 0; counter < RAY_RECURSION_DEPTH; ++counter) {
+        vec2 tracedRay = closestIntersection(P, R, t_min, t_max);
+        int closest_sphere_index = int(tracedRay.x);
+        // If we don't hit an object, we're done
+        if (closest_sphere_index == -1) {
+            rays[counter] = Ray(vec3(0.0), 0.0);
+            break;
+        }
+
+        float closest_t = tracedRay.y;
+
+        // Compute local color
+        Sphere sphere = spheres.instances[closest_sphere_index];
+        P += (closest_t * R);// Compute intersection
+        vec3 N = normalize(P - sphere.center.xyz);
+
+        // V is the vector from the object to the camera, since for reflection we need to know the angle of the
+        // ray reflecting off the object. We already have D, which is the vector of the camera *to* the object,
+        // so just invert that
+        vec3 localColor = sphere.color.xyz * computeLighting(P, N, -R, sphere.specular);
+
+        // If the object is not reflective, we're done
+        float reflectiveness = sphere.reflective;
+        if (reflectiveness <= 0.0) {
+            rays[counter] = Ray(localColor, 0.0);
+            break;
+        }
+
+        // Store the new ray's color and the sphere's reflectiveness
+        rays[counter] = Ray(localColor, reflectiveness);
+
+        // Reflect the ray off the new sphere
+        R = reflectRay(-R, N);
+        t_min = 0.001;
+        t_max = MAX_FLOAT;
     }
 
-    float closest_t = tracedRay.y;
+    vec3 final_color = vec3(rays[counter].color);
 
-    // Compute local color
-    Sphere sphere = spheres.instances[closest_sphere_index];
-    vec3 P = camera.position + (closest_t * D);// Compute intersection
-    vec3 N = normalize(P - sphere.center.xyz);
+    // Now that we have our rays, go back through them in reverse order and assemble the color
+    for (int i = counter; i >= 0; --i) {
+        Ray ray = rays[i];
+        final_color = ray.color * (1.0 - ray.reflectiveness) + final_color * ray.reflectiveness;
+    }
 
-    // V is the vector from the object to the camera, since for reflection we need to know the angle of the
-    // ray reflecting off the object. We already have D, which is the vector of the camera *to* the object,
-    // so just invert that
-    return computeLighting(P, N, -D, sphere.specular) * sphere.color.xyz;
+    return final_color;
 }
 
 vec2 closestIntersection(vec3 P, vec3 D, float t_min, float t_max) {
@@ -84,8 +129,7 @@ vec2 closestIntersection(vec3 P, vec3 D, float t_min, float t_max) {
 
     for (int i = 0; i < SPHERE_COUNT; ++i) {
         Sphere sphere = spheres.instances[i];
-        float sphere_radius = sphere.radius;
-        vec2 t = intersectRaySphere(P, D, sphere.center.xyz, sphere_radius);
+        vec2 t = intersectRaySphere(P, D, sphere.center.xyz, sphere.radius);
         float t1 = t.x;
         float t2 = t.y;
 
@@ -102,7 +146,7 @@ vec2 closestIntersection(vec3 P, vec3 D, float t_min, float t_max) {
 }
 
 vec3 reflectRay(vec3 R, vec3 N) {
-    return 2 * N * dot(N, R) - R;
+    return 2.0 * N * dot(N, R) - R;
 }
 
 float computeLighting(vec3 P, vec3 N, vec3 V, float specularity) {
