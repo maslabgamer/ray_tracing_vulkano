@@ -1,14 +1,14 @@
 #version 450
 
 // Constants
-const float IMAGE_WIDTH = 1920.0;
-const float IMAGE_HEIGHT = 1920.0;
+const float IMAGE_WIDTH = 1080.0;
+const float IMAGE_HEIGHT = 1080.0;
 
-float MAX_FLOAT = 340282350000000000000.0;
+float MAX_FLOAT = 340282350000.0;
 const int SPHERE_COUNT = 4;
 const int LIGHT_COUNT = 3;
 
-const int RAY_RECURSION_DEPTH = 5;
+const int RAY_RECURSION_DEPTH = 4;
 
 // Declare custom functions
 vec3 canvasToViewport();
@@ -25,6 +25,8 @@ layout(set = 0, binding = 0, rgba8) uniform writeonly image2D img;
 
 layout(set = 0, binding = 1) uniform Camera {
     vec3 position;
+    float padding;
+    mat4 rotation;
 } camera;
 
 struct Sphere {
@@ -53,7 +55,7 @@ layout(set = 0, binding = 3) uniform Lights {
 
 void main() {
     // Base raytracing for spheres
-    vec3 D = canvasToViewport();
+    vec3 D = mat3(camera.rotation) * canvasToViewport();
     vec3 sphereColor = traceRay(camera.position, D, 1.0, MAX_FLOAT);
     // Write color value to image buffer
     imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(sphereColor, 1.0));
@@ -108,11 +110,11 @@ vec3 traceRay(vec3 O, vec3 D, float t_min, float t_max) {
 
         // Reflect the ray off the new sphere
         R = reflectRay(-R, N);
-        t_min = 0.001;
+        t_min = 0.1;
         t_max = MAX_FLOAT;
     }
 
-    vec3 final_color = vec3(rays[counter].color);
+    vec3 final_color = rays[counter].color;
 
     // Now that we have our rays, go back through them in reverse order and assemble the color
     for (int i = counter; i >= 0; --i) {
@@ -200,7 +202,6 @@ vec3 canvasToViewport() {
 }
 
 vec2 intersectRaySphere(vec3 P, vec3 D, vec3 center, float radius) {
-    // Hardcoding camera position as (0, 0, 0) for now
     vec3 CO = P - center;
 
     float a = dot(D, D);

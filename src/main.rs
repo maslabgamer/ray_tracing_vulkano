@@ -7,25 +7,32 @@ mod object_traits;
 use crate::sphere::Sphere;
 use crate::object_traits::Uniform;
 use std::sync::Arc;
-use vulkano::image::{StorageImage, Dimensions};
-use vulkano::format::Format;
-use vulkano::buffer::{BufferUsage, CpuBufferPool, CpuAccessibleBuffer};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, CommandBuffer};
-use vulkano::sync::GpuFuture;
+use vulkano::buffer::{BufferUsage, CpuBufferPool};
+use vulkano::command_buffer::AutoCommandBufferBuilder;
+use vulkano::sync::{GpuFuture, FlushError};
 use vulkano::pipeline::ComputePipeline;
-use image::{ImageBuffer, Rgba};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::PipelineLayoutAbstract;
 use crate::camera::Camera;
 use crate::engine::Engine;
 use crate::light::{Light, LightType};
-use cgmath::Vector3;
+use cgmath::{Vector3, InnerSpace, Rad, Angle};
+use std::time::Instant;
+use device_query::{Keycode, DeviceState, DeviceQuery};
+use std::f32::consts::FRAC_PI_2;
+use winit::event_loop::{EventLoop, ControlFlow};
+use winit::event::{Event, WindowEvent};
+use vulkano::swapchain::AcquireError;
+use vulkano::swapchain;
+use vulkano::sync;
 
-const IMAGE_WIDTH: u32 = 1920;
-const IMAGE_HEIGHT: u32 = 1920;
+const IMAGE_WIDTH: usize = 1080;
+const IMAGE_HEIGHT: usize = 1080;
 
 fn main() {
-    let engine = Engine::new();
+    // Create event loop for window
+    let event_loop = EventLoop::new();
+    let mut engine = Engine::new(&event_loop);
 
     // Set up Spheres
     let scene: [Sphere; 4] = [
@@ -71,12 +78,8 @@ fn main() {
     );
 
     // Initialize camera uniform buffer
-    let camera = Camera::from_origin();
-
+    let mut camera = Camera::from_origin();
     let camera_buffer = CpuBufferPool::<cs::ty::Camera>::new(engine.device.clone(), BufferUsage::all());
-
-    let camera_subbuffer = Arc::new(camera_buffer.next(camera.to_uniform()).unwrap());
-
     // Initialize spheres uniform buffer
     let spheres_buffer = CpuBufferPool::<cs::ty::Spheres>::new(engine.device.clone(), BufferUsage::all());
 
@@ -112,55 +115,156 @@ fn main() {
         Arc::new(lights_buffer.next(uniform_data).unwrap())
     };
 
-    // Create an image
-    let image = StorageImage::new(
-        engine.device.clone(),
-        Dimensions::Dim2d { width: IMAGE_WIDTH, height: IMAGE_HEIGHT },
-        Format::R8G8B8A8Unorm,
-        Some(engine.queue.family()),
-    ).unwrap();
+    // Set up input handlers
+    let device_state = DeviceState::new();
+    let mut window_is_focused = true; // Assume focused at startup
 
-    let layout = compute_pipeline.layout().descriptor_set_layout(0).unwrap();
-    let set = Arc::new(
-        PersistentDescriptorSet::start(layout.clone())
-            .add_image(image.clone()).unwrap() // Image we write to
-            .add_buffer(camera_subbuffer.clone()).unwrap() // Camera uniform
-            .add_buffer(spheres_buffer_subbuffer.clone()).unwrap() // Spheres uniform
-            .add_buffer(lights_buffer_subbuffer.clone()).unwrap() // Lights uniform
-            .build().unwrap()
-    );
+    // Set up delta_time timer
+    let mut delta_timer = Instant::now();
 
-    let buf = CpuAccessibleBuffer::from_iter(
-        engine.device.clone(),
-        BufferUsage::all(),
-        false,
-        (0..IMAGE_HEIGHT * IMAGE_WIDTH * 4).map(|_| 0u8),
-    ).expect("failed to create buffer");
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Poll;
+        // Update delta time
+        let now = Instant::now();
+        let dt = (now - delta_timer).as_secs_f32();
+        delta_timer = now;
 
-    // Create command buffer with a draw command dispatch followed by a copy image to buffer command
-    let mut builder = AutoCommandBufferBuilder::new(
-        engine.device.clone(),
-        engine.queue.family(),
-    ).unwrap();
-    builder.dispatch(
-        [IMAGE_WIDTH / 8, IMAGE_HEIGHT / 8, 1],
-        compute_pipeline.clone(),
-        set.clone(), (),
-    ).unwrap()
-        .copy_image_to_buffer(image.clone(), buf.clone()).unwrap();
-    let command_buffer = builder.build().unwrap();
+        // Handle keyboard input
+        let keys: Vec<Keycode> = device_state.get_keys();
+        if !keys.is_empty() {
+            let (yaw_sin, yaw_cos) = (-camera.yaw).sin_cos();
+            let forward = Vector3::new(yaw_cos, 0.0, yaw_sin).normalize();
+            let right = Vector3::new(-yaw_sin, 0.0, yaw_cos).normalize();
 
-    // Execute draw command and save resulting image
-    let finished = command_buffer.execute(engine.queue.clone()).unwrap();
-    finished.then_signal_fence_and_flush().unwrap().wait(None).unwrap();
+            for key in keys {
+                match key {
+                    Keycode::Escape => *control_flow = ControlFlow::Exit,
+                    Keycode::W => camera.position += forward * camera.speed * dt,
+                    Keycode::S => camera.position -= forward * camera.speed * dt,
+                    Keycode::A => camera.position += right * camera.speed * dt,
+                    Keycode::D => camera.position -= right * camera.speed * dt,
+                    Keycode::Space => camera.position.y += camera.speed * dt,
+                    Keycode::LShift => camera.position.y -= camera.speed * dt,
+                    _ => {}
+                }
+            }
+        }
 
-    let buffer_content = buf.read().unwrap();
-    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(
-        IMAGE_WIDTH,
-        IMAGE_HEIGHT,
-        &buffer_content[..],
-    ).unwrap();
-    image.save("image.png").unwrap();
+        // Process window events
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => *control_flow = ControlFlow::Exit,
+            Event::WindowEvent {
+                event: WindowEvent::Resized(_),
+                ..
+            } => engine.recreate_swapchain = true,
+            Event::WindowEvent {
+                event: WindowEvent::Focused(in_focus),
+                ..
+            } => {
+                window_is_focused = in_focus;
+                engine.surface.window().set_cursor_visible(!window_is_focused);
+            }
+            Event::WindowEvent {
+                event: WindowEvent::CursorMoved { position, .. },
+                ..
+            } => {
+                if window_is_focused {
+                    // Handle mouse input
+                    let x_difference = position.x - engine.default_mouse_position.x as f64;
+                    let y_difference = position.y - engine.default_mouse_position.y as f64;
+
+                    camera.yaw += Rad(x_difference as f32) * camera.sensitivity * dt;
+                    camera.pitch += Rad(-y_difference as f32) * camera.sensitivity * dt;
+
+                    if camera.pitch < -Rad(FRAC_PI_2) {
+                        camera.pitch = -Rad(FRAC_PI_2);
+                    } else if camera.pitch > Rad(FRAC_PI_2) {
+                        camera.pitch = Rad(FRAC_PI_2);
+                    }
+
+                    if let Err(_) = engine.surface.window().set_cursor_position(engine.default_mouse_position) {
+                        panic!("Could not set cursor position!");
+                    }
+                }
+            }
+            Event::RedrawEventsCleared => {
+                // Clean up unused resources
+                engine.previous_frame_end.as_mut().unwrap().cleanup_finished();
+
+                // Whenever window resizes we need to recreate everything dependent on the window size.
+                engine.recreate_swapchain();
+
+                // Have to acquire an images from the swapchain before we can draw it
+                let (image_num, suboptimal, acquire_future) =
+                    match swapchain::acquire_next_image(engine.swapchain.clone(), None) {
+                        Ok(r) => r,
+                        Err(AcquireError::OutOfDate) => {
+                            engine.recreate_swapchain = true;
+                            return;
+                        }
+                        Err(e) => panic!("Failed to acquire next image: {:?}", e),
+                    };
+
+                if suboptimal {
+                    engine.recreate_swapchain = true;
+                }
+
+                // Update view
+                let camera_subbuffer = Arc::new(camera_buffer.next(camera.to_uniform()).unwrap());
+
+                // Create command buffer with a draw command dispatch followed by a copy image to buffer command
+                let command_buffer = {
+                    let layout = compute_pipeline.layout().descriptor_set_layout(0).unwrap();
+                    let set = Arc::new(
+                        PersistentDescriptorSet::start(layout.clone())
+                            .add_image(engine.images[image_num].clone()).unwrap() // Image we write to
+                            .add_buffer(camera_subbuffer.clone()).unwrap() // Camera uniform
+                            .add_buffer(spheres_buffer_subbuffer.clone()).unwrap() // Spheres uniform
+                            .add_buffer(lights_buffer_subbuffer.clone()).unwrap() // Lights uniform
+                            .build().unwrap()
+                    );
+
+                    let mut command_buffer = AutoCommandBufferBuilder::new(engine.device.clone(), engine.queue.family())
+                        .unwrap();
+                    command_buffer.dispatch(
+                        [IMAGE_WIDTH as u32 / 8, IMAGE_HEIGHT as u32 / 8, 1],
+                        compute_pipeline.clone(),
+                        set.clone(),
+                        (),
+                    )
+                        .unwrap();
+
+                    command_buffer.build().unwrap()
+                };
+
+                // Execute draw command and save resulting image
+                let future = engine.previous_frame_end
+                    .take()
+                    .unwrap()
+                    .join(acquire_future)
+                    .then_execute(engine.queue.clone(), command_buffer)
+                    .unwrap()
+                    .then_swapchain_present(engine.queue.clone(), engine.swapchain.clone(), image_num)
+                    .then_signal_fence_and_flush();
+
+                match future {
+                    Ok(future) => engine.previous_frame_end = Some(Box::new(future) as Box<_>),
+                    Err(FlushError::OutOfDate) => {
+                        engine.recreate_swapchain = true;
+                        engine.previous_frame_end = Some(Box::new(sync::now(engine.device.clone())) as Box<_>)
+                    }
+                    Err(e) => {
+                        println!("Failed to flush future: {:?}", e);
+                        engine.previous_frame_end = Some(Box::new(sync::now(engine.device.clone())) as Box<_>);
+                    }
+                }
+            }
+            _ => {}
+        }
+    });
 }
 
 mod cs {
