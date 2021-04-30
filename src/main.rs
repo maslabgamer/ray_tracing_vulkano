@@ -26,7 +26,7 @@ use vulkano::swapchain::AcquireError;
 use vulkano::swapchain;
 use vulkano::sync;
 
-const IMAGE_WIDTH: usize = 1080;
+const IMAGE_WIDTH: usize = 1920;
 const IMAGE_HEIGHT: usize = 1080;
 
 fn main() {

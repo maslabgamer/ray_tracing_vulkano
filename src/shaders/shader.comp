@@ -1,7 +1,7 @@
 #version 450
 
 // Constants
-const float IMAGE_WIDTH = 1080.0;
+const float IMAGE_WIDTH = 1920.0;
 const float IMAGE_HEIGHT = 1080.0;
 
 float MAX_FLOAT = 340282350000.0;
@@ -197,8 +197,9 @@ vec3 canvasToViewport() {
     // Since we're not sending in viewport coordinates, we need to calculate them here
     float x = gl_GlobalInvocationID.x - (IMAGE_WIDTH / 2.0);
     float y = gl_GlobalInvocationID.y - (IMAGE_HEIGHT / 2.0);
+    float horizontal_fov = IMAGE_WIDTH / IMAGE_HEIGHT;
 
-    return vec3(x * (1.0 / IMAGE_WIDTH), -(y * (1.0 / IMAGE_HEIGHT)), 1.0);
+    return vec3(x * (horizontal_fov / IMAGE_WIDTH), -(y * (1.0 / IMAGE_HEIGHT)), 1.0);
 }
 
 vec2 intersectRaySphere(vec3 P, vec3 D, vec3 center, float radius) {
